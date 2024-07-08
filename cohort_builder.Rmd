@@ -1,0 +1,166 @@
+---
+title: 'SHIFT 2: Cohort building'
+author: "premysl velek"
+date: "8/2/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is the basic workflow for building specific cohort (subset of the Rotterdam Study
+participants) with the following characteristics defined by the user:
+
+* Follow-up for specific diseases (from among those available to us)
+* Specific follow-up time
+* Specific mean age at baseline
+* Specific sex ratio (men only, women only or both)
+
+The workflow has several functions (detailed below), the output are two data frames with data for the same 
+cohort (ie. same participants, same follow-up time, the same baseline date and the same outcome (mortality)), but with different independent variables: 
+
+* The *index cohort* contains indicator variable for presence of set of user defined diseases at baseline
+* The *count cohort* contains the number of co-occurring diseases at baseline from among 10 non-communicable diseases with high burden in older populations (cancer, dementia, diabetes, coronary heart disease, heart failure, COPD, asthma, parkinsonism, stroke, depression) 
+
+The goal is to compare the performance of two approaches to defining multimorbidity  (with respect to mortality): one is simple count of co-occurring diseases, the other is weighted approach in which different diseases have different weights. The weights are derived for different diseases coming from different multimorbidity indices.
+
+## Workflow 
+
+As the workflow builds specific cohort, it has to be repeated for each individual index you want to test. The starting point is the index cohort.
+
+The workflow relies on a couple of libraries and a couple of helper functions. They all have to be loaded for it to work. All code in the document assumes you're working from the SHIFT_2 project. You start the project by opening the `SHIFT_2.Rproj` file located in the `SHIFT_2` folder.
+
+```{r preliminaries, echo=TRUE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(lubridate)
+
+source(here::here("R", "get_cohorts.R"))
+
+```
+
+### Index cohort
+
+To create the index cohort data, we need to have the relevant data, the *index data*. This is a dataset with follow up data for a set of diseases that are relevant for a given multimorbidity index. 
+
+The function `get_index_cohort` takes as an input the index data, selects ERGO participants who have a complete follow up for particular diseases used in the given index and selects the baseline date (the follow up start) so that the mean age of the cohort at baseline matches with the mean age of the cohort used to develop that particular index. It can also select men or women only if that's the case of the original index. 
+
+The arguments of the function are:
+
+* index_data: data containing all the diseases in a given index. The following data have to be included:
+  + Start and end of follow up for each individual disease and the prevalence/incidence indicators. The names of the variables have to be in the standard SHIFT form, e.g. 'startd_chd', 'endd_chd', 'inc_chd', 'prev_chd'. (Diseases that don't require any additional change to match the disease definition in the index cohort can be taken directly form the SHIFT data.) This structure have to be included even for additional variables for which we don't have longitudinal data (e.g. ADL). In this case, all cases will be prevalent and no case will be incident. The follow up start would then be the date of the interview, test, screening, etc. (In this particular case the end of follow up is not relevant and can stay empty) 
+  + Information about the individual ERGO cohorts (RS-I, RS-II, RS-II).  
+  + Date of birth (birthd), censor date (fp_censordate) and vital status for each participants (died), coded with 1 for death and 0 for living.
+  + Overall follow-up start (the latest follow-up start among the individual diseases, fu_start) and follow_up end (the earliest follow up end from among the individual diseases, fu_end)
+  
+* diseases: character vector with the diseases included in the index you want to validate. They have to be in the standard SHIFT form, as indicated in the list below. 
+
+  + dia: diabetes
+  + stroke: stroke
+  + can1: cancer, all types
+  + dem: dementia
+  + hf: heart failure
+  + chd: coronary heart disease
+  + park: parkinsonism
+  + dep1: depression
+  + COPD: chronic obstructive pulmonary disease
+  + asthma: asthma
+  
+  Abbreviations for diseases created specifically for a particular index should match those in the 'index_data' dataset.
+
+* mean_age_index: the mean age of the index cohort, i.e. the mean age to which we need to get as close as possible to warrant fair comparison. Only integer values are allowed. **IMPORTANT NOTE: if your data does not allow you to move the follow up start (typically because you only have cross-sectional data for some diseases), ignore this argument. The function will not move the follow ups start.**
+* sex_ratio_index: whether men only, women only or both men and women should be
+ included in the cohort, based on the original cohort of each index. Only three
+ values are allowed: women_only will results in a cohort with only women, men_only
+ will result in a cohort with only men, both - the default - will not change the
+ sex ratio
+* fu_time_index: the follow-up time of the original paper
+
+To use the function, you simply assign it to a variable. To give an example, we use the Tooth, 2008 index. First we load the data and prepare it so we can pass the data to the `get_index-cohort` function:
+
+```{r Tooth, 2008 index data preparation, cache = TRUE}
+
+# load the data
+load(here::here("data", "indices", "tooth", "tooth_final.RData"))
+
+# If you need to convert some columns to R type date, you can do it as follows:
+# 
+# data <- data %>%
+#   mutate(across(contains(c("_endd", "_startd", "date"), as.Date))
+
+# in the character vector within the `contains` function should include all column names (or their parts) that are supposed to be a date.
+
+# select only the relevant columns and calculate the age at the ERGO baseline
+tooth_index <- shift_data_tooth |>
+  rename(fu_start = shift_fu_start)|>
+#' since we only have prevalent cases of anemia (at the time of the measurement), we need to add dummy variable for incident anemia and end of follow up. In this case all cases will be prevalent and none will be incident
+  mutate(prev_anemia = if_else(anemia, "yes", "no"),
+         inc_anemia = if_else(anemia, "prev", "no"),
+         endd_anemia = fp_censordate,
+         
+         age = (birthd %--% fu_start) / years(1),
+         died = unclass(died)) |>
+
+  #'  The index uses these seven diseases: diabetes, cancer, anemia, lung disease, heart disease, dementia and stroke. So we select only those.
+  dplyr::select(contains(c("anemia", "lung", "hd", "dem",
+                           "stroke", "can1", "dia")),
+                sex, birthd, ergoid, rs_cohort,
+                fu_start, fp_censordate, died) |>
+  # we only want participants with complete follow up, so we're dropping all participants with any missing values
+  drop_na()
+
+```
+
+
+Now we can create the index cohort. The mean age of the original Tooth 2008 cohort was 75, the follow up time was 6 years, only women were included:
+
+
+```{r index cohort run}
+
+tooth_index_cohort <- get_index_cohort(index_data = tooth_index, 
+                                       diseases = c("dia", "can1", "anemia", 
+                                                    "lung", "hd", "dem", "stroke"),
+                                       mean_age_index = 75,
+                                       sex_ratio_index = "women_only", 
+                                       fu_time_index = 6)
+
+```
+
+### Count cohort
+
+Once you created the index cohort, you will then use it to create the count cohort. It will have the same follow up start the same follow up time and the same participants. But in this case, we will use all ten diseases included in the SHIFT data and count how many diseases each participant had at the start of the follow up. The function `get_count_cohort` creates this count cohort, based on the index cohort (the output of the `get_index_cohort` function).
+
+The arguments of the function are:
+
+* index_data: the index cohort dataset, output of the `get_index_cohort` function
+* data: the original SHIFT data. By default, it is assumed to be the shift_data but it has be loaded into R beforehand
+
+Following on our previous example with the Tooth 2008 index, we get the count cohort for this index as follows:
+
+```{r count cohort run}
+
+tooth_count_cohort <- get_count_cohort(index_cohort_data = tooth_index_cohort)
+
+```
+
+
+Note that the sample size will be likely smaller than that for the index cohort as there is more variables in the count cohort and hence greater chance of any of the variables being missing. That's why we need to do one last step.
+
+### Index cohort update
+
+As the last step, we need to remove those patients who have complete follow up in the index cohort but who miss some variables (diseases) in the count cohort:
+
+
+```{r index cohort update}
+tooth_index_cohort <- tooth_index_cohort[tooth_index_cohort$ergoid %in% tooth_count_cohort$ergoid, ]
+```
+
+Now, we have two cohorts *tooth_index_cohort* and *tooth_count_cohort* that have the same participants, the same follow up start, the same follow-up time and the same outcome.
+
+We can now move on to compare them. Hurrah :D
+
+### Data analysis
+
+TBC
