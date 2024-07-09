@@ -15,7 +15,6 @@ All questions regarding the scripts should be directed to Premysl Velek, p.velek
 
 Below is explanation of how the script was built and the workflow used. For details on specific analytic choices, refer to the respective functions in the `99_get_cohorts.R` script. Note that data cleaning is not included in the workflow as it builds on [our previous work](https://doi.org/10.1186/s12916-022-02487-x). Details can be found in `01_clean_index.R`, and in the specific scripts to clean data according to Robusto, 2016 and von Korff, 1992 (to be found in their respective folders).
 
-
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(eval = FALSE)
 ```
@@ -109,7 +108,7 @@ The arguments of the function are:
 * fu_time_index: the follow-up time of the original paper
 
 
-```{r index cohort, cache = TRUE}
+```{r index cohort}
 
 tooth_index <- get_index_cohort(index_data = tooth,
                                 mean_age_index = NULL,
@@ -132,7 +131,7 @@ The arguments of the function are:
 * index_data: the index cohort dataset, output of the `get_index_cohort` function
 * data: the original SHIFT data. By default, it is assumed to be the shift_data but it has be loaded into R beforehand
 
-```{r count cohort, cache = TRUE}
+```{r count cohort}
 tooth_count <- get_count_cohort(index_cohort_data = tooth_index)
 ```
 
@@ -143,7 +142,7 @@ Note that the sample size will likely be smaller than that for the index cohort 
 As the last step, we need to remove those patients who have complete follow up in the index cohort but who miss some variables (diseases) in the count cohort:
 
 
-```{r index cohort update, cache = TRUE}
+```{r index cohort update}
 tooth_index <- tooth_index[tooth_index$ergoid %in% tooth_count$ergoid, ]
 ```
 
@@ -151,7 +150,7 @@ tooth_index <- tooth_index[tooth_index$ergoid %in% tooth_count$ergoid, ]
 
 The last step is to calculate the index value based on the assigned weights:
 
-```{r index values, cache = TRUE}
+```{r index values}
 tooth_index_values <- get_index_values(index_cohort_data = tooth_index,
                                       diseases = d,
                                       weights = w)
@@ -159,7 +158,7 @@ tooth_index_values <- get_index_values(index_cohort_data = tooth_index,
 
 Now, we have two cohorts *tooth_index* and *tooth_count* that have the same participants, the same follow up start, the same follow-up time and the same outcome. We save them.
 
-```{r save, cache = TRUE}
+```{r save}
 save(tooth_index_values, tooth_count, tooth_index,
      file = here::here("RESULTS_FINAL", "final_data", "tooth2008_data.RData"))
 ```
@@ -189,7 +188,7 @@ This function fits a logistic regression model on the data and produce a series 
 * Fits of the three models, as returned by the `rms::lrm` function
 * calibration plots
 
-```{r validate, cache = TRUE}
+```{r validate}
 load(here::here("RESULTS_FINAL", "final_data", "desai2002_data.RData"))
 
 df <- left_join(desai_count,
